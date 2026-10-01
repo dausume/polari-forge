@@ -69,8 +69,9 @@ over stdin; the API token travels in a curl header read from a process substitut
     pol forge down                   stop; the volume is KEPT (docker volume rm polari-forge_forge-data discards it)
     pol forge status                 running/health, version, URL, volume, token
     pol forge token [--new]          check the admin token, mint one when missing/refused
-    pol forge mirror <owner/repo>    pull-mirror one GitHub repo (POST /api/v1/repos/migrate, mirror, 8h);
+    pol forge mirror <owner/repo>    pull-mirror one GitHub repo (POST /api/v1/repos/migrate, mirror, WEEKLY check — his ruling; a fetch moves only deltas);
                                      skips a repo already there; the forge-side owner is an org of the same name
+    pol forge mirror --sync <owner/repo> | --sync --forest   ask for a fetch NOW (after a release) instead of the weekly check
     pol forge mirror --forest        every line of forest.txt
     pol forge meter [--json]         THE STORAGE METER (COST.md)
     pol forge retention <K> [--dry-run] [--owner <o>]

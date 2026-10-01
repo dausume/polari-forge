@@ -94,7 +94,9 @@ ENABLED = false
 
 [mirror]
 ENABLED          = true
-DEFAULT_INTERVAL = 8h
+; his ruling 2026-09-30: check GitHub for changes once a WEEK (a fetch moves only deltas — this governs
+; staleness, not cost); `pol forge mirror --sync` asks for a fetch right now, e.g. after a release
+DEFAULT_INTERVAL = 168h
 MIN_INTERVAL     = 10m
 
 [session]
