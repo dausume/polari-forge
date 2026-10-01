@@ -25,7 +25,7 @@ sizes="$(docker exec "$CTR" sh -c '
   find /data/git/repositories -mindepth 2 -maxdepth 2 -type d -name "*.git" 2>/dev/null | wc -l' 2>/dev/null || true)"
 # package versions (every type) under the owner, counted page by page
 pk=0
-if [ -s "$GEN/token" ]; then
+if [ -n "$(token)" ]; then
     page=1
     while [ "$page" -le 200 ]; do
         api GET "/api/v1/packages/$FORGE_OWNER?limit=50&page=$page"
@@ -40,7 +40,7 @@ fi
 
 # held: repos under FORGE_OWNER that are mirrors, counted page by page
 held=0
-if [ -s "$GEN/token" ]; then
+if [ -n "$(token)" ]; then
     page=1
     while [ "$page" -le 200 ]; do
         api GET "/api/v1/orgs/$FORGE_OWNER/repos?limit=50&page=$page"

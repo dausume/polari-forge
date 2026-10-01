@@ -6,9 +6,10 @@
 #   anon-read      REQUIRE_SIGNIN_VIEW = false (anyone reads; nobody signs up)
 #   indexer        REPO_INDEXER_ENABLED = false
 #   mem-limit      a memory limit ≤ 512 MiB (compose file; the live container too)
-#   ports          every published port bound to 127.0.0.1
+#   ports          compose home: every published port bound to 127.0.0.1
+#                  swarm home (a pol prod service): NO published port at all (behind pol-proxy)
 #   secrets        forge.env + app.ini mode 600
-#   admin-token    .generated/forge/token mode 600
+#   admin-token    .generated/forge/token mode 600 (swarm home: the vault's forge ADMIN_TOKEN)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 case "${1:-}" in -h|--help|help) sed -n '2,12p' "$0"; exit 0 ;; esac
@@ -51,7 +52,28 @@ else
     row mem-limit OK "$decl${live:+ (live $((live/1048576)) MiB)}"
 fi
 
-# ports: live bindings when running, else the compose file
+# ports. The swarm home (frg-2) must publish NOTHING — a swarm publish ignores the host IP
+# (ingress = every interface), so the only safe number is zero; pol-proxy reaches forge:3000 on the
+# overlay. The compose home: live bindings when running, else the compose file — loopback only.
+if forge_is_service; then
+    pub=''; svc=''
+    if [ -n "$CTR" ]; then
+        svc="$(docker inspect -f '{{index .Config.Labels "com.docker.swarm.service.name"}}' "$CTR" 2>/dev/null || true)"
+        [ -n "$svc" ] && pub="$(docker service inspect -f '{{range .Endpoint.Ports}}{{.PublishedPort}}->{{.TargetPort}} {{end}}' "$svc" 2>/dev/null || true)"
+    else
+        # not running: the rendered stack file(s) pol prod wrote
+        for sf in ${FORGE_STACK_FILES:-}; do
+            [ -f "$sf" ] || continue
+            pub+="$(python3 -c 'import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+f = (d.get("services") or {}).get("forge") or {}
+print(" ".join(str(p.get("published", p) if isinstance(p, dict) else p) for p in (f.get("ports") or [])))' "$sf" 2>/dev/null || true)"
+        done
+    fi
+    pub="$(printf '%s' "$pub" | xargs)"
+    if [ -z "$pub" ]; then row ports OK "none published (behind pol-proxy)${svc:+ — service $svc}"
+    else row ports WARN "published on every interface (swarm ingress): $pub — the stack must drop ports:"; fi
+else
 bad=''; seen=''
 if [ -n "$CTR" ]; then
     binds="$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}:{{.HostPort}}->{{$p}} {{end}}{{end}}' "$CTR" 2>/dev/null || true)"
@@ -66,6 +88,7 @@ fi
 if [ -z "$seen" ]; then row ports WARN "no published ports found"
 elif [ -n "$bad" ]; then row ports WARN "not loopback: ${bad% }"
 else row ports OK "loopback only: ${seen% }"; fi
+fi
 
 m1="$(stat -c %a "$GEN/forge.env" 2>/dev/null || echo none)"; m2="$(stat -c %a "$INI" 2>/dev/null || echo none)"
 [ "$m1" = 600 ] && [ "$m2" = 600 ] && row secrets OK "forge.env 600 · app.ini 600" || row secrets WARN "forge.env $m1 · app.ini $m2 (want 600)"
@@ -73,13 +96,15 @@ m1="$(stat -c %a "$GEN/forge.env" 2>/dev/null || echo none)"; m2="$(stat -c %a "
 if [ -f "$GEN/token" ]; then
     mt="$(stat -c %a "$GEN/token")"
     [ "$mt" = 600 ] && row admin-token OK "token 600" || row admin-token WARN "token mode $mt (want 600)"
+elif [ -n "${FORGE_TOKEN:-}" ]; then
+    row admin-token OK "in the vault (forge ADMIN_TOKEN) — no file"
 else
     row admin-token WARN "no token file yet (pol forge up)"
 fi
 
 total=$((NOK+NWARN))
 if [ "$NWARN" = 0 ]; then
-    printf "${F_BOLD}posture: OK %d/%d${F_NC} — registration off · anonymous read · indexer off · %s · loopback · secrets+token 600\n" "$NOK" "$total" "${decl:-?}"
+    printf "${F_BOLD}posture: OK %d/%d${F_NC} — registration off · anonymous read · indexer off · %s · %s · secrets+token 600\n" "$NOK" "$total" "${decl:-?}" "$(forge_is_service && echo 'no published port' || echo loopback)"
     exit 0
 fi
 printf "${F_BOLD}posture: WARN %d/%d${F_NC} —" "$NWARN" "$total"

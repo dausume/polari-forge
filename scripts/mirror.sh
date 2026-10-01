@@ -15,7 +15,7 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 case "${1:-}" in ''|-h|--help|help) sed -n '2,14p' "$0"; [ -n "${1:-}" ]; exit $? ;; esac
-[ -s "$GEN/token" ] || die "no admin token — pol forge up (or pol forge token)"
+[ -n "$(token)" ] || die "no admin token — pol forge up (or pol forge token)"
 
 ensure_org() {
     local o="$1"

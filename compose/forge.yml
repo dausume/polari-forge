@@ -3,8 +3,11 @@
 # Driven only through `pol forge up|down|status` (scripts/up.sh):
 #   docker compose -f compose/forge.yml --project-name polari-forge …
 #
-# Swarm-clean on purpose (frg-2 deploys the same file as a stack): no
-# container_name, no build:, no profiles, no bind mounts, limits under deploy:.
+# Swarm-clean on purpose: no container_name, no build:, no profiles, no bind
+# mounts, limits under deploy:. frg-2 (the forge on production, POL_PROD_FORGE=on)
+# runs the same service as `forge` in the suite's docker-compose.{lean,prod}.yml
+# (compose profile "forge", no ports:, volume polari_forge_data); `pol prod` reads
+# the image line BELOW at render time — THIS line is the one pin.
 #
 # ⚠ NO `user: "${UID}:${GID}"` here. The forgejo image is ROOTFUL: its
 # entrypoint starts as root, re-numbers the in-image `git` user to

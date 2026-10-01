@@ -52,6 +52,11 @@ chmod 600 "$GEN/container.env"
 # ---------------------------------------------------------------- app.ini
 ROOT_URL="$FORGE_ROOT_URL"; DOMAIN="$FORGE_DOMAIN"; SSH_DOMAIN="${FORGE_SSH_DOMAIN:-$FORGE_DOMAIN}"
 HTTP_PORT=3000; SSH_PORT="$FORGE_SSH_PORT"
+# frg-2: the production home publishes no ssh port (https only this slice) → pol prod renders
+# FORGE_DISABLE_SSH=true so no ssh clone URL is advertised; behind pol-proxy the proxy's address
+# is an overlay one (10.0.0.0/8), so FORGE_TRUSTED_PROXIES widens the real-IP trust there.
+DISABLE_SSH="${FORGE_DISABLE_SSH:-false}"; TRUSTED_PROXIES="${FORGE_TRUSTED_PROXIES:-127.0.0.0/8,::1/128}"
+case "$DISABLE_SSH" in true|false) ;; *) die "FORGE_DISABLE_SSH must be true or false" ;; esac
 shopt -u patsub_replacement 2>/dev/null || true   # bash 5.2: '&' in a replacement must stay literal
 tmpl="$FORGE_DIR/config/app.ini.template"
 [ -f "$tmpl" ] || die "missing $tmpl"
@@ -59,7 +64,7 @@ out=""
 while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
         *'${'*)
-            for v in ROOT_URL DOMAIN SSH_DOMAIN HTTP_PORT SSH_PORT SECRET_KEY INTERNAL_TOKEN JWT_SECRET LFS_JWT_SECRET; do
+            for v in ROOT_URL DOMAIN SSH_DOMAIN HTTP_PORT SSH_PORT DISABLE_SSH TRUSTED_PROXIES SECRET_KEY INTERNAL_TOKEN JWT_SECRET LFS_JWT_SECRET; do
                 line="${line//\$\{$v\}/${!v}}"
             done ;;
     esac
@@ -72,4 +77,8 @@ empty="$(printf '%s' "$out" | grep -nE '^(SECRET_KEY|INTERNAL_TOKEN|JWT_SECRET|L
 [ -z "$empty" ] || die "empty values in app.ini: $empty"
 printf '%s' "$out" > "$GEN/app.ini"
 chmod 600 "$GEN/app.ini"
-okl "rendered $GEN/app.ini (ROOT_URL $ROOT_URL · http 127.0.0.1:$FORGE_HTTP_PORT · ssh 127.0.0.1:$FORGE_SSH_PORT · USER_UID $uid)"
+if [ "$DISABLE_SSH" = true ]; then
+    okl "rendered $GEN/app.ini (ROOT_URL $ROOT_URL · ssh off · USER_UID $uid)"
+else
+    okl "rendered $GEN/app.ini (ROOT_URL $ROOT_URL · http 127.0.0.1:$FORGE_HTTP_PORT · ssh 127.0.0.1:$FORGE_SSH_PORT · USER_UID $uid)"
+fi

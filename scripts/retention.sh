@@ -19,7 +19,7 @@ while [ $# -gt 0 ]; do
 done
 case "$K" in ''|*[!0-9]*) die "usage: retention <K> [--dry-run] [--owner <o>] — K = versions kept per package (e.g. 3)" ;; esac
 [ "$K" -ge 1 ] || die "K must be at least 1 (retention never empties a package)"
-[ -s "$GEN/token" ] || die "no admin token — pol forge up"
+[ -n "$(token)" ] || die "no admin token — pol forge up"
 KEEP="${FORGE_KEEP:-$FORGE_DIR/keep.txt}"
 
 pkgs_mib() { bash "$FORGE_DIR/scripts/meter.sh" --json 2>/dev/null | jget areas.packages; }

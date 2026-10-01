@@ -45,12 +45,21 @@ case "$1" in
   image)   exit 0 ;;
   pull)    exit 0 ;;
   volume)  exit 0 ;;
-  ps)      [ -f "$S/running" ] && echo "$CID"; exit 0 ;;
+  # FAKE_SWARM=1: the forge runs as a pol prod stack task (frg-2) — no compose container,
+  # a container labelled com.docker.swarm.service.name=polari-lean_forge, the service exists
+  ps)      if [ -n "${FAKE_SWARM:-}" ]; then
+               case "$*" in *"com.docker.swarm.service.name=polari-lean_forge"*) [ -f "$S/running" ] && echo "$CID" ;; esac
+           else
+               case "$*" in *com.docker.swarm*) ;; *) [ -f "$S/running" ] && echo "$CID" ;; esac
+           fi; exit 0 ;;
+  service) [ -n "${FAKE_SWARM:-}" ] || exit 1
+           case "$*" in *Endpoint.Ports*) printf '%s' "${FAKE_SVC_PORTS:-}" ;; esac; exit 0 ;;
   stats)   echo "${FAKE_STATS:-94.2MiB / 512MiB|0.50%}"; exit 0 ;;
   cp)      # docker cp -a - <cid>:/data/  — record the tar's listing, never its secrets
            tar -tvf - --numeric-owner > "$S/cp.list"; exit 0 ;;
   inspect) case "$*" in
              *HostConfig.Memory*)   echo "${FAKE_MEM-536870912}" ;;
+             *swarm.service.name*)  echo polari-lean_forge ;;
              *PortBindings*)        echo "${FAKE_BINDS-127.0.0.1:2222->22/tcp 127.0.0.1:3300->3000/tcp }" ;;
              *Health*)              echo healthy ;;
            esac; exit 0 ;;
@@ -62,7 +71,11 @@ case "$1" in
              down)    rm -f "$S/running" ;;
            esac; exit 0 ;;
   exec)    case "$*" in
-             *"admin user list"*)          echo "ID   Username     Email"; [ -f "$S/admin" ] && echo "1    polari-admin x@forge.invalid" ;;
+             # the swarm home's API route: docker exec -i <task> curl … -H @- http://localhost:3000/…
+             *" curl "*)                   echo "exec curl" >> "$S/exec-curl.log"
+                                           while [ $# -gt 0 ] && [ "$1" != curl ]; do shift; done; shift
+                                           exec "$(dirname "$0")/curl" "$@" ;;
+             *"admin user list"*)         echo "ID   Username     Email"; [ -f "$S/admin" ] && echo "1    polari-admin x@forge.invalid" ;;
              *"admin user create"*)        cat > /dev/null; touch "$S/admin"; echo "created" ;;
              *generate-access-token*)      echo "faketoken0123456789abcdef" ;;
              *memory.peak*)                echo "${FAKE_PEAK:-480247808}" ;;
@@ -81,7 +94,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -X) M="$2"; shift ;;
     --data) D="$2"; shift ;;
-    -H) case "$2" in @*) f="${2#@}"; AUTH="$(cat "$f" 2>/dev/null)" ;; esac; shift ;;
+    -H) case "$2" in @-) AUTH="$(cat)" ;; @*) f="${2#@}"; AUTH="$(cat "$f" 2>/dev/null)" ;; esac; shift ;;
     -w|-o) shift ;;
     -*) ;;
     *) URL="$1" ;;
@@ -376,6 +389,80 @@ has "posture (not running) reads the compose ports" "not loopback: 0.0.0.0:3300:
 cp "$T/forge.yml.bak" "$P/compose/forge.yml"
 chmod 644 "$G/token"; out="$(run posture || true)"; has "posture flags a loose token mode" "token mode 644" "$out"; chmod 600 "$G/token"
 touch "$S/running"
+
+# ---------------------------------------------------------------- frg-2: the swarm home (a pol prod stack service)
+eq "the ONE pin: _lib.sh's IMAGE is read from compose/forge.yml" \
+   "$(awk '/^[[:space:]]*image:/{print $2; exit}' "$P/compose/forge.yml")" "$(bash -c "source '$P/scripts/_lib.sh'; echo \"\$IMAGE\"")"
+out="$(FAKE_SWARM=1 bash -c "source '$P/scripts/_lib.sh'; echo \"ctr=\$(forge_ctr) mode=\$(forge_mode) compose=\$(compose_ctr)\"")"
+eq "swarm: forge_ctr resolves the TASK by com.docker.swarm.service.name=<stack>_forge" "ctr=fakecid0123456789 mode=swarm compose=" "$out"
+out="$(FAKE_SWARM=1 FORGE_STACK=polari-prod bash -c "source '$P/scripts/_lib.sh'; echo \"ctr=\$(forge_ctr)\"")"
+eq "swarm: FORGE_STACK narrows the stacks searched" "ctr=" "$out"
+out="$(bash -c "source '$P/scripts/_lib.sh'; echo \"mode=\$(forge_mode)\"")"
+eq "compose: the home forge's container wins (mode compose)" "mode=compose" "$out"
+: > "$S/curl.log"; rm -f "$S/exec-curl.log"
+out="$(FAKE_SWARM=1 run status)"
+has "swarm status: running, mode swarm" "— swarm — container fakecid0123" "$out"
+has "swarm status: the API through docker exec (no published port)" "docker exec fakecid01234 → http://localhost:3000 (no published port)" "$out"
+has "swarm status: ssh not exposed" "ssh not exposed — https only" "$out"
+has "swarm status: the version came back through the exec route" "Forgejo 11.0.16" "$out"
+eq "swarm: the API went through docker exec … curl (not the host's curl to a port)" yes "$([ -s "$S/exec-curl.log" ] && echo yes || echo no)"
+has "swarm: …to localhost:3000 inside the task" "http://localhost:3000/api/v1/version" "$(cat "$S/curl.log")"
+hasnt "swarm: …never the host port 3300" "127.0.0.1:3300" "$(cat "$S/curl.log")"
+# the token from the vault (FORGE_TOKEN, no file) — through stdin, never argv
+mv "$G/token" "$T/token.bak"
+: > "$S/docker.log"; : > "$S/curl.log"
+out="$(FAKE_SWARM=1 FORGE_TOKEN=faketoken0123456789abcdef run meter --json)"
+eq "swarm meter: held counted with the vault's token (FORGE_TOKEN)" 13 "$(line="$out"; jv held)"
+hasnt "swarm: the token never rides docker's argv" "faketoken" "$(cat "$S/docker.log")"
+hasnt "swarm: …nor curl's" "faketoken" "$(cat "$S/curl.log")"
+out="$(FAKE_SWARM=1 FORGE_TOKEN=faketoken0123456789abcdef run token)"
+has "swarm token: the vault's token is valid → kept, named as the vault" "kept: the vault (forge ADMIN_TOKEN)" "$out"
+out="$(FAKE_SWARM=1 FORGE_TOKEN=faketoken0123456789abcdef run status)"
+has "swarm status: token in the vault" "token:   the vault (forge ADMIN_TOKEN)" "$out"
+out="$(FAKE_SWARM=1 FORGE_TOKEN=faketoken0123456789abcdef run posture || true)"
+has "swarm posture: ports — none published (behind pol-proxy)" "none published (behind pol-proxy)" "$out"
+has "swarm posture: the service named" "service polari-lean_forge" "$out"
+has "swarm posture: admin token in the vault" "in the vault (forge ADMIN_TOKEN)" "$out"
+has "swarm posture: OK 7/7, no published port" "posture: OK 7/7" "$out"
+hasnt "swarm posture: no loopback row (that is the compose home's)" "loopback only" "$out"
+out="$(FAKE_SWARM=1 FAKE_SVC_PORTS='3000->3000 ' FORGE_TOKEN=faketoken0123456789abcdef run posture || true)"
+has "swarm posture: a published port is a WARN (ingress = every interface)" "published on every interface (swarm ingress): 3000->3000" "$out"
+mv "$T/token.bak" "$G/token"
+# not running, answered on: the rendered stack file is read
+rm -f "$S/running"
+printf 'services:\n  forge:\n    image: x\n' > "$T/stack-ok.yml"
+printf 'services:\n  forge:\n    image: x\n    ports:\n      - published: 3300\n        target: 3000\n' > "$T/stack-bad.yml"
+out="$(FORGE_PROD=on FORGE_STACK_FILES="$T/stack-ok.yml" run posture || true)"
+has "prod posture (no task): the rendered stack publishes nothing → OK" "none published (behind pol-proxy)" "$out"
+out="$(FORGE_PROD=on FORGE_STACK_FILES="$T/stack-bad.yml" run posture || true)"
+has "prod posture (no task): a ports: in the rendered stack → WARN" "published on every interface (swarm ingress): 3300" "$out"
+out="$(FORGE_PROD=on run status || true)"
+has "prod status (no task): points at pol prod" "the pol prod service has no running task here" "$out"
+touch "$S/running"
+# up/down refuse on a swarm; ready.sh (pol prod apply's admin step) works through the task
+out="$(FAKE_SWARM=1 run up || true)"
+has "swarm: pol forge up refuses" "this forge is a pol prod service — pol prod apply / pol prod down" "$out"
+out="$(FAKE_SWARM=1 run down || true)"
+has "swarm: pol forge down refuses" "this forge is a pol prod service — pol prod apply / pol prod down" "$out"
+out="$(FORGE_PROD=on run up 2>&1 || true)"
+hasnt "answered on but the home compose container runs → the compose home wins (up allowed)" "pol prod service" "$out"
+rm -f "$S/admin"; : > "$S/docker.log"
+out="$(FAKE_SWARM=1 FORGE_PASSWORD_WHERE='the vault (forge ADMIN_PASSWORD)' run ready)"
+has "swarm ready: waits for the API through the task" "answering on docker exec" "$out"
+has "swarm ready: creates the admin in the task" "admin user polari-admin created (password: ADMIN_PASSWORD in the vault (forge ADMIN_PASSWORD))" "$out"
+ap="$(sed -n 's/^ADMIN_PASSWORD=//p' "$G/forge.env")"
+hasnt "swarm ready: the admin password never in docker's argv" "$ap" "$(cat "$S/docker.log")"
+# render knobs for the production home
+FORGE_DISABLE_SSH=true FORGE_TRUSTED_PROXIES=10.0.0.0/8 FORGE_ROOT_URL=https://forge.example.invalid/ FORGE_DOMAIN=forge.example.invalid run render >/dev/null
+eq "render: FORGE_DISABLE_SSH=true → [server] DISABLE_SSH = true (no ssh clone URL advertised)" true "$(ini_get server DISABLE_SSH "$INI")"
+eq "render: FORGE_TRUSTED_PROXIES → the overlay range" 10.0.0.0/8 "$(ini_get security REVERSE_PROXY_TRUSTED_PROXIES "$INI")"
+eq "render: ROOT_URL https://forge.<D>/" https://forge.example.invalid/ "$(ini_get server ROOT_URL "$INI")"
+run render >/dev/null
+eq "render: the defaults keep the home forge's app.ini (DISABLE_SSH false)" false "$(ini_get server DISABLE_SSH "$INI")"
+eq "render: …and loopback-only proxy trust" "127.0.0.0/8,::1/128" "$(ini_get security REVERSE_PROXY_TRUSTED_PROXIES "$INI")"
+out="$(FORGE_APT_URL=https://apt.example.invalid run apt-source)"
+has "apt-source: production's apt.<D> line (FORGE_APT_URL)" 'deb [signed-by=/etc/apt/keyrings/polari-forge.asc] https://apt.example.invalid stable main' "$out"
+has "apt-source: the key at apt.<D>/repository.key" 'https://apt.example.invalid/repository.key' "$out"
 
 # ---------------------------------------------------------------- apt-source
 out="$(run apt-source dausume)"

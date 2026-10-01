@@ -5,5 +5,6 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 case "${1:-}" in -h|--help|help) sed -n '2,4p' "$0"; exit 0 ;; esac
+refuse_if_service   # frg-2: a pol prod stack service is stopped by pol prod down, never here
 compose down >/dev/null 2>&1 || compose down
 okl "forge down — volume $VOLUME kept (docker volume rm $VOLUME to discard the content)"

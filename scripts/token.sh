@@ -2,6 +2,8 @@
 # token.sh — `pol forge token [--new]`: the admin API token in .generated/forge/token (600).
 # Kept while GET /api/v1/user accepts it; minted again (scopes: all) when it is
 # missing or refused, or with --new. Prints the file path, never the token.
+# The swarm home: the kept token is FORGE_TOKEN (the vault's forge ADMIN_TOKEN); a
+# freshly minted one lands in the file and `pol forge token` moves it into the vault.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 NEW=0; QUIET=0
@@ -9,11 +11,11 @@ for a in "$@"; do case "$a" in --new) NEW=1 ;; --quiet) QUIET=1 ;; -h|--help|hel
 need_ctr
 umask 077; mkdir -p "$GEN"
 
-if [ "$NEW" = 0 ] && [ -s "$GEN/token" ]; then
+if [ "$NEW" = 0 ] && [ -n "$(token)" ]; then
     api GET /api/v1/user
     if [ "$API_CODE" = 200 ]; then
-        chmod 600 "$GEN/token"
-        okl "admin token valid, kept: $GEN/token (mode 600)"
+        [ -f "$GEN/token" ] && chmod 600 "$GEN/token"
+        okl "admin token valid, kept: $(token_where)"
         exit 0
     fi
 fi
