@@ -1,0 +1,149 @@
+; polari-forge — Forgejo app.ini TEMPLATE (the capability, never the content).
+; scripts/render.sh fills every ${VAR} from .generated/forge/forge.env and the
+; FORGE_* knobs and writes .generated/forge/app.ini (mode 600, gitignored);
+; scripts/up.sh copies it into the volume at /data/gitea/conf/app.ini.
+; Render refuses to finish while any ${...} is left unfilled.
+;
+; THE POSTURE (his ruling 2026-09-30): registration OFF, anonymous READ only,
+; no open sign-up, repo indexer OFF, cron trimmed. `pol forge posture` reads
+; these lines back.
+
+APP_NAME = Polari Forge
+RUN_MODE = prod
+WORK_PATH = /data/gitea
+
+[server]
+APP_DATA_PATH    = /data/gitea
+PROTOCOL         = http
+DOMAIN           = ${DOMAIN}
+SSH_DOMAIN       = ${SSH_DOMAIN}
+HTTP_PORT        = ${HTTP_PORT}
+ROOT_URL         = ${ROOT_URL}
+DISABLE_SSH      = false
+SSH_PORT         = ${SSH_PORT}
+SSH_LISTEN_PORT  = 22
+LFS_START_SERVER = false
+LFS_JWT_SECRET   = ${LFS_JWT_SECRET}
+OFFLINE_MODE     = true
+LANDING_PAGE     = explore
+
+[database]
+DB_TYPE = sqlite3
+PATH    = /data/gitea/forgejo.db
+LOG_SQL = false
+
+[repository]
+ROOT = /data/git/repositories
+DEFAULT_PRIVATE = public
+DISABLE_DOWNLOAD_SOURCE_ARCHIVES = false
+
+[repository.local]
+LOCAL_COPY_PATH = /data/gitea/tmp/local-repo
+
+[repository.upload]
+TEMP_PATH = /data/gitea/uploads
+
+[security]
+INSTALL_LOCK   = true
+SECRET_KEY     = ${SECRET_KEY}
+INTERNAL_TOKEN = ${INTERNAL_TOKEN}
+REVERSE_PROXY_LIMIT = 1
+REVERSE_PROXY_TRUSTED_PROXIES = 127.0.0.0/8,::1/128
+LOGIN_REMEMBER_DAYS = 7
+
+[oauth2]
+JWT_SECRET = ${JWT_SECRET}
+
+[service]
+DISABLE_REGISTRATION              = true
+REQUIRE_SIGNIN_VIEW               = false
+ALLOW_ONLY_EXTERNAL_REGISTRATION  = false
+ENABLE_CAPTCHA                    = false
+DEFAULT_ALLOW_CREATE_ORGANIZATION = false
+SHOW_REGISTRATION_BUTTON          = false
+ENABLE_NOTIFY_MAIL                = false
+
+[openid]
+ENABLE_OPENID_SIGNIN = false
+ENABLE_OPENID_SIGNUP = false
+
+[mailer]
+ENABLED = false
+
+[picture]
+DISABLE_GRAVATAR = true
+ENABLE_FEDERATED_AVATAR = false
+AVATAR_UPLOAD_PATH = /data/gitea/avatars
+REPOSITORY_AVATAR_UPLOAD_PATH = /data/gitea/repo-avatars
+
+[attachment]
+PATH = /data/gitea/attachments
+
+[packages]
+ENABLED = true
+
+[indexer]
+REPO_INDEXER_ENABLED = false
+ISSUE_INDEXER_PATH   = /data/gitea/indexers/issues.bleve
+
+[actions]
+ENABLED = false
+
+[federation]
+ENABLED = false
+
+[mirror]
+ENABLED          = true
+DEFAULT_INTERVAL = 8h
+MIN_INTERVAL     = 10m
+
+[session]
+PROVIDER        = file
+PROVIDER_CONFIG = /data/gitea/sessions
+
+[lfs]
+PATH = /data/git/lfs
+
+[log]
+MODE      = console
+LEVEL     = Warn
+ROOT_PATH = /data/gitea/log
+
+[other]
+SHOW_FOOTER_VERSION = false
+SHOW_FOOTER_TEMPLATE_LOAD_TIME = false
+
+; ---------------------------------------------------------------- cron, trimmed
+; The defaults wake a lot of jobs on a small box. Keep what keeps the forge
+; healthy, slow everything else, drop the phone-home.
+[cron]
+ENABLED = true
+RUN_AT_START = false
+
+[cron.update_mirrors]
+SCHEDULE = @every 30m
+
+[cron.update_checker]
+ENABLED = false
+
+[cron.repo_health_check]
+SCHEDULE = @every 168h
+
+[cron.check_repo_stats]
+RUN_AT_START = false
+SCHEDULE = @every 168h
+
+[cron.archive_cleanup]
+SCHEDULE = @every 24h
+OLDER_THAN = 24h
+
+[cron.git_gc_repos]
+ENABLED = true
+SCHEDULE = @every 168h
+
+[cron.cleanup_packages]
+ENABLED = true
+SCHEDULE = @every 24h
+
+[cron.delete_old_system_notices]
+ENABLED = true

@@ -1,0 +1,48 @@
+{
+ "schema": "polari-app/1",
+ "id": "polari-forge",
+ "title": "Polari Forge",
+ "description": "The self-hosted forge (Forgejo): git hosting that mirrors the forest, and the Debian package registry that replaces the reprepro apt route. The project is the capability, never the content - repos, packages, database and keys live in the named volume.",
+ "version": "0.1.0",
+ "kind": "service",
+ "repo": "https://github.com/dausume/polari-forge.git",
+ "license": "GPL-3.0-or-later",
+ "image": {
+  "ref": "codeberg.org/forgejo/forgejo:11",
+  "digest": "sha256:946243edbab116d5bb78b73ea68af6f3d69229ba1b1ed958dd82c3481167f3e0",
+  "upstreamLicense": "GPL-3.0-or-later",
+  "upstreamVersion": "11.0.16"
+ },
+ "compose": "compose/forge.yml",
+ "ports": [
+  {"container": 3000, "protocol": "http", "host": "127.0.0.1:3300", "knob": "FORGE_HTTP_PORT"},
+  {"container": 22, "protocol": "ssh", "host": "127.0.0.1:2222", "knob": "FORGE_SSH_PORT"}
+ ],
+ "volumes": [
+  {"name": "forge-data", "mount": "/data", "holds": "repositories, packages, sqlite database, sessions, ssh host keys, the registry signing key, app.ini"}
+ ],
+ "security": {
+  "profile": "web-app",
+  "writable": ["/data"],
+  "network": ["internet"],
+  "capabilities": [],
+  "devices": [],
+  "ports": [3000, 22]
+ },
+ "requires": {
+  "modules": [],
+  "libraries": [],
+  "engines": []
+ },
+ "cost": {
+  "measuredAt": "2026-09-30",
+  "measuredOn": "the home dev box",
+  "memLimitMiB": 512,
+  "idleRssMiB": 94,
+  "peakRssMiB": 455,
+  "peakDuring": "Debian package signing",
+  "gitForestMB": 51,
+  "meter": "pol forge meter"
+ },
+ "notes": "Not wired into pol prod profiles yet (frg-2/frg-3). The image is rootful: it starts as root and drops to USER_UID under s6, which uses the docker-default SETUID/SETGID/CHOWN - capabilities [] means none ADDED beyond docker-default."
+}

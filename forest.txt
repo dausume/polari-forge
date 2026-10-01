@@ -1,0 +1,15 @@
+# The public forest the forge mirrors with `pol forge mirror --forest` (owner/repo on GitHub).
+# The forge-side owner is an organisation of the same name. frg-1 runs this on the box he chooses.
+dausume/polari-suite
+dausume/polari-cli
+dausume/polari-node
+dausume/Polari-Framework
+dausume/polari-platform-angular
+dausume/political-scorecard-node
+dausume/political-scorecard-backend
+dausume/political-scorecard-frontend
+dausume/polari-app-shell
+dausume/Isle-Mesh
+dausume/polari-eda-tools
+dausume/polari-proof-tools
+dausume/polari-torch-tools

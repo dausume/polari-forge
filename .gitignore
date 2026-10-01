@@ -1,0 +1,48 @@
+# THE PROJECT IS THE CAPABILITY, NEVER THE CONTENT.
+# Everything a forge RUN produces lives in the named volume `forge-data` or in
+# .generated/ — never in this tree. selftest.sh proves it (the clean-tree rule).
+
+# rendered config, secrets, the admin token, the meter log
+.generated/
+secrets/
+app.ini
+*.env
+!*.env.example
+
+# anything the volume would leave behind if someone bind-mounted it here
+data/
+gitea/
+git/
+ssh/
+repositories/
+packages/
+attachments/
+avatars/
+repo-avatars/
+sessions/
+indexers/
+queues/
+log/
+lfs/
+tmp/
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# keys and certificates
+*.pem
+*.key
+*.asc
+*.gpg
+*.crt
+id_*
+
+# scratch
+*.log
+*.jsonl
+*.tmp

@@ -1,0 +1,53 @@
+# polari-forge — the self-hosted forge (Forgejo), ONE service.
+#
+# Driven only through `pol forge up|down|status` (scripts/up.sh):
+#   docker compose -f compose/forge.yml --project-name polari-forge …
+#
+# Swarm-clean on purpose (frg-2 deploys the same file as a stack): no
+# container_name, no build:, no profiles, no bind mounts, limits under deploy:.
+#
+# ⚠ NO `user: "${UID}:${GID}"` here. The forgejo image is ROOTFUL: its
+# entrypoint starts as root, re-numbers the in-image `git` user to
+# USER_UID/USER_GID and drops to it under s6 (sshd needs root to start).
+# Forcing `user:` breaks that. Ownership is set the image's own way — USER_UID /
+# USER_GID in .generated/forge/container.env (render.sh writes the host UID,
+# 1000 when the host user is root: Forgejo refuses to run as root). There is no
+# writable bind mount, so nothing root-owned can land on the host.
+#
+# ⚠ Ports are LOOPBACK-only for compose. A swarm publish ignores the host IP
+# (ingress publishes on every interface), so a stack deploy must drop `ports:`
+# and sit behind pol-proxy — frg-2's job, not this file's.
+#
+# app.ini is NOT mounted: the image's setup step rewrites app.ini in place
+# (environment-to-ini) and Forgejo writes to it, so a read-only mount fails and
+# a bind mount would break swarm-cleanness. scripts/up.sh copies the rendered
+# .generated/forge/app.ini INTO the volume (docker cp, owned by USER_UID, mode
+# 600) between `create` and `start`, on every up.
+
+services:
+  forge:
+    image: codeberg.org/forgejo/forgejo:11@sha256:946243edbab116d5bb78b73ea68af6f3d69229ba1b1ed958dd82c3481167f3e0
+    # USER_UID / USER_GID only — the secrets stay in forge.env (mode 600) and
+    # never enter the container environment (docker inspect would show them).
+    env_file:
+      - ../.generated/forge/container.env
+    ports:
+      - "127.0.0.1:${FORGE_HTTP_PORT:-3300}:3000"
+      - "127.0.0.1:${FORGE_SSH_PORT:-2222}:22"
+    volumes:
+      - forge-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  forge-data:

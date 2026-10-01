@@ -1,0 +1,4 @@
+# Packages retention never deletes, beyond the newest K versions it always keeps.
+#   name            keep every version of that package
+#   name@version    keep that one version
+# (empty: retention keeps only the newest K per package)
