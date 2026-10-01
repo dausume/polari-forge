@@ -1,14 +1,17 @@
 #!/bin/bash
 # meter.sh — `pol forge meter [--json]`: THE STORAGE METER. One JSON line
 #   {at, rss_mib, peak_mib, cpu_pct, data_mib, areas:{git,packages,db,attachments,log},
-#    repos, packages}
+#    repos, packages, held, linked, primary}
 # appended to .generated/forge/meter.jsonl and printed as a table (--json: the
 # line only). rss/cpu from `docker stats`; peak from the container's cgroup
 # memory.peak (null when unreadable); sizes from `du -sm` inside the container.
+# held = repos on the forge that are mirrors (GET /api/v1/orgs/<owner>/repos, paginated);
+# linked = lines in .generated/forge/links.txt (hold=link, not held — pol forge links);
+# primary = 0 for now (his ruling 2026-09-30: not implemented this slice).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 JSON=0
-case "${1:-}" in --json) JSON=1 ;; -h|--help|help) sed -n '2,7p' "$0"; exit 0 ;; esac
+case "${1:-}" in --json) JSON=1 ;; -h|--help|help) sed -n '2,10p' "$0"; exit 0 ;; esac
 need_ctr
 mkdir -p "$GEN"
 
@@ -35,7 +38,30 @@ except Exception: print(0)')"
     done
 fi
 
-line="$(STATS="$stats" PEAK="$peak" SIZES="$sizes" PK="${pk:-0}" python3 - <<'PY'
+# held: repos under FORGE_OWNER that are mirrors, counted page by page
+held=0
+if [ -s "$GEN/token" ]; then
+    page=1
+    while [ "$page" -le 200 ]; do
+        api GET "/api/v1/orgs/$FORGE_OWNER/repos?limit=50&page=$page"
+        [ "$API_CODE" = 200 ] || break
+        read -r c m <<<"$(printf '%s' "$API_BODY" | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d=[]
+print(len(d), sum(1 for r in d if r.get("mirror")))')"
+        [ -n "${c:-}" ] && [ "$c" -gt 0 ] || break
+        held=$((held+m)); page=$((page+1))
+    done
+fi
+# linked: lines in links.txt (hold=link entries — not held)
+linked=0
+if [ -s "$GEN/links.txt" ]; then
+    linked="$(grep -cve '^[[:space:]]*$' "$GEN/links.txt" || true)"
+    linked="${linked:-0}"
+fi
+primary=0   # not implemented this slice (his ruling 2026-09-30)
+
+line="$(STATS="$stats" PEAK="$peak" SIZES="$sizes" PK="${pk:-0}" HELD="$held" LINKED="$linked" PRIMARY="$primary" python3 - <<'PY'
 import json, os, re, datetime
 def mib(s):
     m = re.match(r'\s*([\d.]+)\s*([KMGT]?i?B)', s or '')
@@ -56,6 +82,9 @@ print(json.dumps({
     'areas': {'git': n(1), 'packages': n(2), 'db': n(3), 'attachments': n(4), 'log': n(5)},
     'repos': n(6),
     'packages': int(os.environ['PK']) if os.environ['PK'].isdigit() else 0,
+    'held': int(os.environ['HELD']) if os.environ['HELD'].isdigit() else 0,
+    'linked': int(os.environ['LINKED']) if os.environ['LINKED'].isdigit() else 0,
+    'primary': int(os.environ['PRIMARY']) if os.environ['PRIMARY'].isdigit() else 0,
 }, separators=(',', ':')))
 PY
 )"
@@ -70,5 +99,6 @@ rows = [("at", d["at"]), ("rss", f(d["rss_mib"], " MiB")), ("peak", f(d["peak_mi
         ("cpu", f(d["cpu_pct"], " %")), ("data (total)", f(d["data_mib"], " MiB"))]
 rows += [("  " + k, f(a[k], " MiB")) for k in ("git", "packages", "db", "attachments", "log")]
 rows += [("repos", f(d["repos"])), ("packages", f(d["packages"]))]
+rows += [("held", f(d["held"])), ("linked", f(d["linked"])), ("primary", f(d["primary"]))]
 for k, v in rows: print("  %-14s %s" % (k, v))'
 say "  (appended to $GEN/meter.jsonl)"

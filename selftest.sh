@@ -95,13 +95,43 @@ case "$M $PATHONLY" in
 esac
 case "$AUTH" in *faketoken*) ;; *) r 401 '{"message":"token is required"}' ;; esac
 case "$M $PATHONLY" in
+  "GET /api/v1/orgs/"*"/repos")
+                           o="${PATHONLY#/api/v1/orgs/}"; o="${o%/repos}"
+                           case "$P" in *page=1) ;; *) r 200 '[]' ;; esac
+                           items=''
+                           if [ -f "$S/repos" ]; then
+                               while IFS= read -r fr; do
+                                   case "$fr" in
+                                     "$o/"*) if grep -qxF "$fr" "$S/nonmirror" 2>/dev/null
+                                             then items="${items}{\"full_name\":\"$fr\",\"mirror\":false},"
+                                             else items="${items}{\"full_name\":\"$fr\",\"mirror\":true},"; fi ;;
+                                   esac
+                               done < "$S/repos"
+                           fi
+                           r 200 "[${items%,}]" ;;
   "GET /api/v1/orgs/"*)    grep -qx "${PATHONLY#/api/v1/orgs/}" "$S/orgs" 2>/dev/null && r 200 '{}' || r 404 '{}' ;;
   "POST /api/v1/orgs")     o="$(printf '%s' "$D" | python3 -c 'import json,sys;print(json.load(sys.stdin)["username"])')"; echo "$o" >> "$S/orgs"; r 201 '{}' ;;
   "POST /api/v1/repos/migrate")
                            printf '%s\n' "$D" >> "$S/migrate.log"
                            printf '%s' "$D" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["repo_owner"]+"/"+d["repo_name"])' >> "$S/repos"
                            r 201 '{"mirror":true,"empty":false}' ;;
-  "GET /api/v1/repos/"*)   grep -qx "${PATHONLY#/api/v1/repos/}" "$S/repos" 2>/dev/null && r 200 '{"mirror":true,"empty":false}' || r 404 '{}' ;;
+  "POST /api/v1/repos/"*"/mirror-sync")
+                           r 200 '{}' ;;
+  "DELETE /api/v1/repos/"*)
+                           orp="${PATHONLY#/api/v1/repos/}"
+                           if grep -qxF "$orp" "$S/repos" 2>/dev/null; then
+                               grep -vxF "$orp" "$S/repos" > "$S/repos.tmp" 2>/dev/null || true
+                               mv "$S/repos.tmp" "$S/repos"
+                               echo "$orp" >> "$S/repo_dropped"
+                               r 204 ''
+                           else
+                               r 404 '{}'
+                           fi ;;
+  "GET /api/v1/repos/"*)   orp="${PATHONLY#/api/v1/repos/}"
+                           if grep -qxF "$orp" "$S/nonmirror" 2>/dev/null; then r 200 '{"mirror":false,"empty":false}'
+                           elif grep -qxF "$orp" "$S/repos" 2>/dev/null; then r 200 '{"mirror":true,"empty":false}'
+                           else r 404 '{}'
+                           fi ;;
   "GET /api/v1/packages/"*/files)
                            rest="${PATHONLY#/api/v1/packages/*/debian/}"; n="${rest%%/*}"; v="${rest#*/}"; v="${v%/files}"
                            r 200 "[{\"name\":\"${n}_${v}_amd64.deb\"}]" ;;
@@ -220,6 +250,54 @@ out="$(run mirror --forest)"
 eq "--forest on the shipped list: 13 considered" "13" "$(printf '%s' "$out" | sed -n 's/.*forest: \([0-9]*\) repos.*/\1/p')"
 hasnt "the token never rides curl's argv" "faketoken" "$(cat "$S/curl.log")"
 
+# ---------------------------------------------------------------- links: none yet
+out="$(run links)"
+has "links (none yet)" "no links" "$out"
+
+# ---------------------------------------------------------------- hold levels: mirror (bare + hold=mirror), primary, link
+printf 'dausume/polari-cli\ndausume/hold-primary-1 hold=primary\ndausume/hold-link-1 hold=link\ndausume/polari-cli hold=link\n' > "$T/forest-hold.txt"
+out="$(FORGE_FOREST="$T/forest-hold.txt" run mirror --forest)"
+has "hold=: a bare line (no hold=) defaults to mirror, already there → skip" "skip   dausume/polari-cli" "$out"
+has "hold=primary: recognised, not yet implemented" "hold=primary" "$out"
+has "hold=primary: the note says treated as mirror" "treated as mirror" "$out"
+has "hold=primary: still migrated (treated as mirror)" '"repo_name":"hold-primary-1"' "$(cat "$S/migrate.log")"
+has "hold=link: not migrated, printed as not held" "link   dausume/hold-link-1 → https://github.com/dausume/hold-link-1 (not held)" "$out"
+hasnt "hold=link: never migrated" '"repo_name":"hold-link-1"' "$(cat "$S/migrate.log")"
+has "hold=link on an ALREADY-held repo warns" "link   dausume/polari-cli is already held on the forge" "$out"
+has "…and names the drop command" "pol forge mirror --drop dausume/polari-cli" "$out"
+has "--forest: 4 repos considered" "forest: 4 repos considered" "$out"
+eq "links.txt holds the two hold=link lines" 2 "$(grep -c . "$G/links.txt")"
+has "links.txt: hold-link-1" "dausume/hold-link-1 https://github.com/dausume/hold-link-1" "$(cat "$G/links.txt")"
+has "links.txt: polari-cli (recorded, with the warn, since its line said link)" "dausume/polari-cli https://github.com/dausume/polari-cli" "$(cat "$G/links.txt")"
+
+out="$(run links)"
+has "links: prints hold-link-1" "link   dausume/hold-link-1 → https://github.com/dausume/hold-link-1 (not held)" "$out"
+has "links: prints polari-cli" "link   dausume/polari-cli → https://github.com/dausume/polari-cli (not held)" "$out"
+has "links: a count line" "2 linked (not held)" "$out"
+printf 'dausume/bogus hold=bogus\n' > "$T/forest-bad.txt"
+out="$(FORGE_FOREST="$T/forest-bad.txt" run mirror --forest || true)"
+has "forest.txt: an unknown hold= value is refused" "unknown hold=bogus" "$out"
+
+# ---------------------------------------------------------------- --sync --forest skips hold=link lines
+: > "$S/curl.log"
+out="$(FORGE_FOREST="$T/forest-hold.txt" run mirror --sync --forest)"
+has "--sync --forest: synced vs skipped" "forest: sync asked for 2 repos (2 link entries skipped)" "$out"
+eq "--sync --forest: exactly 2 mirror-sync calls (link lines never fetched)" 2 "$(grep -c mirror-sync "$S/curl.log")"
+
+# ---------------------------------------------------------------- --drop (refuses a non-mirror, deletes a mirror)
+printf 'dausume/legacy-primary\n' >> "$S/repos"
+printf 'dausume/legacy-primary\n' >> "$S/nonmirror"
+out="$(run mirror --drop dausume/legacy-primary || true)"
+has "--drop refuses a non-mirror" "refusing to drop dausume/legacy-primary — it is not a mirror" "$out"
+hasnt "--drop: nothing was deleted" "dausume/legacy-primary" "$(cat "$S/repo_dropped" 2>/dev/null || true)"
+has "--drop: a refused repo stays on the forge" "dausume/legacy-primary" "$(cat "$S/repos")"
+out="$(run mirror --drop dausume/hold-primary-1)"
+has "--drop deletes a mirror" "dropped dausume/hold-primary-1" "$out"
+has "--drop: DELETE was sent" "dausume/hold-primary-1" "$(cat "$S/repo_dropped")"
+hasnt "--drop: removed from the forge" "dausume/hold-primary-1" "$(cat "$S/repos")"
+out="$(run mirror --drop dausume/not-on-the-forge || true)"
+has "--drop refuses a repo that is not on the forge" "is not on the forge" "$out"
+
 # ---------------------------------------------------------------- meter
 out="$(run meter)"
 line="$(printf '%s\n' "$out" | head -n1)"
@@ -235,6 +313,12 @@ eq "meter: areas.git"                 40    "$(jv areas.git)"
 eq "meter: areas.packages"            2     "$(jv areas.packages)"
 eq "meter: areas.db"                  3     "$(jv areas.db)"
 eq "meter: repos"                     13    "$(jv repos)"
+eq "meter: held (mirrors on the forge, via the org's repo listing)" 13 "$(jv held)"
+eq "meter: linked (hold=link lines in links.txt)" 2 "$(jv linked)"
+eq "meter: primary (not implemented this slice)" 0 "$(jv primary)"
+exp="$(printf '  %-14s %s' held 13)";   has "meter: table shows held"    "$exp" "$out"
+exp="$(printf '  %-14s %s' linked 2)";  has "meter: table shows linked"  "$exp" "$out"
+exp="$(printf '  %-14s %s' primary 0)"; has "meter: table shows primary" "$exp" "$out"
 has "meter: a table" "data (total)   51 MiB" "$out"
 eq "meter: one line appended to meter.jsonl" 1 "$(wc -l < "$G/meter.jsonl")"
 out="$(FAKE_PEAK=max run meter --json)"
@@ -323,7 +407,8 @@ if [ -f "$CLI" ]; then
     out="$(POL_SUITE_ROOT="$T/nosuite" bash "$CLI" status 2>&1 || true)"
     has "pol forge refuses when the submodule is not checked out" "polari-forge is not checked out" "$out"
     out="$(POL_SUITE_ROOT="$T/nosuite" bash "$CLI" help 2>&1)"
-    for v in up down status render token mirror meter retention posture apt-source selftest; do has "pol forge help lists $v" "$v" "$out"; done
+    for v in up down status render token mirror meter retention posture apt-source links selftest; do has "pol forge help lists $v" "$v" "$out"; done
+    has "pol forge help: mirror --drop" "mirror --drop" "$out"
 fi
 
 # ---------------------------------------------------------------- THE CLEAN-TREE RULE

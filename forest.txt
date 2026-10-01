@@ -1,15 +1,27 @@
-# The public forest the forge mirrors with `pol forge mirror --forest` (owner/repo on GitHub).
-# The forge-side owner is an organisation of the same name. frg-1 runs this on the box he chooses.
-dausume/polari-suite
-dausume/polari-cli
-dausume/polari-node
-dausume/Polari-Framework
-dausume/polari-platform-angular
-dausume/political-scorecard-node
-dausume/political-scorecard-backend
-dausume/political-scorecard-frontend
-dausume/polari-app-shell
-dausume/Isle-Mesh
-dausume/polari-eda-tools
-dausume/polari-proof-tools
-dausume/polari-torch-tools
+# The public forest `pol forge mirror --forest` acts on: one `owner/repo [hold=LEVEL]` per
+# line (# comments allowed, inline or whole-line). The forge-side owner is an organisation
+# of the same name.
+#
+# Hold levels (his ruling 2026-09-30). A line with no hold= field defaults to mirror.
+#   mirror    held here, read-only, full copy — re-fetched on a WEEKLY check (`pol forge
+#             mirror --sync` asks for a fetch right now, e.g. right after a release). The default.
+#   primary   held here as the record of truth, GitHub becomes the PUSH mirror — NOT
+#             implemented in this slice (frg-2+); recognised and reported as "not yet:
+#             treated as mirror".
+#   link      NOT held here — a pointer to GitHub only. No migrate; recorded in
+#             .generated/forge/links.txt and printed by `pol forge links`.
+#
+# All 13 repos are `mirror` today — the forest packs to ~51 MB, code is cheap to hold in full.
+dausume/polari-suite hold=mirror
+dausume/polari-cli hold=mirror
+dausume/polari-node hold=mirror
+dausume/Polari-Framework hold=mirror
+dausume/polari-platform-angular hold=mirror
+dausume/political-scorecard-node hold=mirror
+dausume/political-scorecard-backend hold=mirror
+dausume/political-scorecard-frontend hold=mirror
+dausume/polari-app-shell hold=mirror
+dausume/Isle-Mesh hold=mirror
+dausume/polari-eda-tools hold=mirror
+dausume/polari-proof-tools hold=mirror
+dausume/polari-torch-tools hold=mirror
